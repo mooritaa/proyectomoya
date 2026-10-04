@@ -12,7 +12,6 @@ import ActualizarPassword from './componentes/actualizarpasword';
 import Nosotros from './componentes/Nosotros';
 import BotonTema from './componentes/BotonTema';
 import Admin from './componentes/Admin';
-import Retos from './componentes/Retos';
 
 function App() {
   return (
@@ -54,9 +53,6 @@ function App() {
 
           {/* RUTA ADMIN */}
           <Route path="/admin" element={<Admin />} />
-
-          {/* RUTA RETOS */}
-          <Route path="/retos" element={<Retos />} />
         </Routes>
       </div>
     </Router>

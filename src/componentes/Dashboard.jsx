@@ -30,12 +30,13 @@ import {
   ImagePlus,
   Inbox,
   RotateCcw,
-  Trophy,
   ShieldAlert,
   Eye,
   Flag,
+  Users,
 } from 'lucide-react';
 import AlertModal from './AlertModal';
+import { cargarActividad } from './notificacionesDB';
 
 const STORAGE_KEY_NOTIF_LEIDAS = 'pocketwork_notificaciones_leidas';
 
@@ -251,7 +252,7 @@ const Dashboard = () => {
   const [notificacionesLeidasCount, setNotificacionesLeidasCount] = useState(0);
 
   // Mis números (estadísticas del artista)
-  const [misNumeros, setMisNumeros] = useState({ vistas: 0, likes: 0, comentarios: 0, top: [] });
+  const [misNumeros, setMisNumeros] = useState({ vistas: 0, likes: 0, comentarios: 0, seguidores: 0, seguidos: 0, top: [] });
 
   // UI
   const [editandoTitulo, setEditandoTitulo] = useState(false);
@@ -333,7 +334,20 @@ const Dashboard = () => {
       .sort((a, b) => (porObra[b.id] || 0) - (porObra[a.id] || 0))
       .slice(0, 3)
       .map((o) => ({ id: o.id, titulo: o.titulo, vistas: porObra[o.id] || 0 }));
-    setMisNumeros({ vistas: (v || []).length, likes, comentarios, top });
+    let seguidores = 0;
+    let seguidos = 0;
+    try {
+      const [a, b] = await Promise.all([
+        supabase.from('seguimientos').select('id', { count: 'exact', head: true }).eq('seguido_id', usuario.id),
+        supabase.from('seguimientos').select('id', { count: 'exact', head: true }).eq('seguidor_id', usuario.id),
+      ]);
+      seguidores = a.count || 0;
+      seguidos = b.count || 0;
+    } catch (error) {
+      seguidores = 0;
+      seguidos = 0;
+    }
+    setMisNumeros({ vistas: (v || []).length, likes, comentarios, seguidores, seguidos, top });
   };
 
   const registrarVista = (proyectoId) => {
@@ -360,42 +374,25 @@ const Dashboard = () => {
     }
   };
 
-  const formatearNotificacion = (comentario) => {
-    const obra = obras.find((o) => o.id === comentario.proyecto_id);
-    const nombreObra = obra ? obra.titulo : 'tu publicación';
-    const nombreAutor = comentario.perfiles?.nombre_completo || 'Alguien';
-    return {
-      id: comentario.id,
-      texto: `${nombreAutor} comentó en ${nombreObra}: "${comentario.contenido}"`,
-      fecha: comentario.creado_el,
-      proyecto_id: comentario.proyecto_id,
-    };
-  };
-
+  // Actividad unificada: comentarios, seguidores y reportes (mismo
+  // formato que la pantalla de notificaciones).
   const cargarNotificaciones = async () => {
-    if (!usuario || obras.length === 0) return [];
+    if (!usuario) return [];
 
-    const proyectosIds = obras.map((o) => o.id);
-    const { data, error } = await supabase
-      .from('comentarios')
-      .select(`id, proyecto_id, usuario_id, creado_el, contenido, perfiles(nombre_completo)`)
-      .in('proyecto_id', proyectosIds)
-      .neq('usuario_id', usuario.id);
-
-    if (!error && data) {
-      const formateadas = data.map(formatearNotificacion);
-      setNotificaciones(formateadas);
-      actualizarContador(formateadas.length);
-      return formateadas;
+    try {
+      const items = await cargarActividad(usuario.id);
+      setNotificaciones(items);
+      actualizarContador(items.length);
+      return items;
+    } catch (error) {
+      return [];
     }
-
-    return [];
   };
 
   useEffect(() => {
-    if (usuario && obras.length > 0) cargarNotificaciones();
+    if (usuario) cargarNotificaciones();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [obras, usuario]);
+  }, [usuario]);
 
   useEffect(() => {
     const intervalo = setInterval(() => {
@@ -403,7 +400,7 @@ const Dashboard = () => {
     }, 20000);
     return () => clearInterval(intervalo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [obras, usuario]);
+  }, [usuario]);
 
   const manejarIrNotificaciones = async () => {
     const listaActual = await cargarNotificaciones();
@@ -680,6 +677,11 @@ const Dashboard = () => {
       return;
     }
 
+    if (perfil.contacto.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(perfil.contacto.trim())) {
+      avisar('El contacto debe ser un correo electrónico válido.', 'info');
+      return;
+    }
+
     setCargando(true);
 
     const datosParaDB = {
@@ -938,28 +940,6 @@ return (
 
           {menuAbierto && (
             <div className="dash-menu menu-caer">
-              <button
-                type="button"
-                className="dash-menu-item"
-                onClick={() => {
-                  setMenuAbierto(false);
-                  navigate('/galeria');
-                }}
-              >
-                <ImageIcon size={18} /> Galería
-              </button>
-
-              <button
-                type="button"
-                className="dash-menu-item"
-                onClick={() => {
-                  setMenuAbierto(false);
-                  navigate('/retos');
-                }}
-              >
-                <Trophy size={18} /> Retos
-              </button>
-
               {perfil.esAdmin && (
                 <button
                   type="button"
@@ -1164,7 +1144,7 @@ return (
             </div>
           </div>
 
-          <button type="button" className="btn btn-exito" onClick={guardarCambiosPerfil}>
+          <button type="button" className="btn btn-primario" onClick={guardarCambiosPerfil}>
             <Save size={16} /> Guardar cambios
           </button>
           <button type="button" className="btn btn-ghost" onClick={restablecerTema} title="Volver al tema Pocketwork sin banner">
@@ -1199,12 +1179,12 @@ return (
             />
           </div>
           <div className="dash-grupo">
-            <span className="dash-etiqueta">Contacto (correo o red)</span>
+            <span className="dash-etiqueta">Contacto (correo electrónico)</span>
             <input
-              type="text"
-              maxLength={60}
+              type="email"
+              maxLength={65}
               className="campo"
-              placeholder="¿Cómo te contactan?"
+              placeholder="tu@correo.com"
               value={perfil.contacto}
               onChange={(e) => setPerfil({ ...perfil, contacto: e.target.value })}
             />
@@ -1222,6 +1202,8 @@ return (
           <span className="dash-stat"><Eye size={14} /> {misNumeros.vistas} vistas</span>
           <span className="dash-stat"><Heart size={14} /> {misNumeros.likes} likes</span>
           <span className="dash-stat"><MessageCircle size={14} /> {misNumeros.comentarios} comentarios</span>
+          <span className="dash-stat"><Users size={14} /> {misNumeros.seguidores} seguidores</span>
+          <span className="dash-stat"><User size={14} /> {misNumeros.seguidos} seguidos</span>
         </div>
         {misNumeros.top.length > 0 && (
           <div className="columna mt-3">

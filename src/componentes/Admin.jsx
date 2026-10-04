@@ -4,23 +4,54 @@ import { useNavigate } from 'react-router-dom';
 import AlertModal from './AlertModal';
 import '../estilos/perfil.css';
 import {
-  ArrowLeft, ShieldAlert, Users, Flag, Trophy, BarChart3,
-  Check, X, Trash2, Ban, Crown, Plus,
+  ArrowLeft, ShieldAlert, Users, Flag, BarChart3,
+  Check, X, Trash2, Ban, Crown,
 } from 'lucide-react';
 
+// Vista previa del contenido reportado (proyecto, comentario o perfil).
+const VistaContenido = ({ contenido }) => {
+  if (!contenido) return null;
+  return (
+    <div className="fila">
+      {contenido.imagen && !contenido.esVideo && (
+        <img src={contenido.imagen} alt="" className="avatar avatar-md" />
+      )}
+      {contenido.imagen && contenido.esVideo && (
+        <video src={contenido.imagen} className="avatar avatar-md" muted playsInline preload="metadata" />
+      )}
+      <div className="crecer">
+        <p className="sin-margen texto-2"><strong>{contenido.titulo}</strong></p>
+        {contenido.subtitulo && <small className="texto-3">{contenido.subtitulo}</small>}
+      </div>
+    </div>
+  );
+};
+
+// Botón que alterna entre suspender y reactivar (deshacer).
+const BotonSuspension = ({ suspendido, onSuspender }) => (
+  suspendido ? (
+    <button type="button" className="btn-icono" title="Reactivar usuario" onClick={() => onSuspender(false)}>
+      <Check size={16} />
+    </button>
+  ) : (
+    <button type="button" className="btn-icono peligro" title="Suspender usuario" onClick={() => onSuspender(true)}>
+      <Ban size={16} />
+    </button>
+  )
+);
+
 // Panel de administración (solo tipo_cuenta === 'admin').
-// Pestañas: reportes, usuarios, retos y resumen.
+// Pestañas: reportes y usuarios, más resumen.
 const Admin = () => {
   const navigate = useNavigate();
   const [cargando, setCargando] = useState(true);
   const [esAdmin, setEsAdmin] = useState(false);
   const [miId, setMiId] = useState(null);
   const [tab, setTab] = useState('reportes');
-  const [stats, setStats] = useState({ usuarios: 0, proyectos: 0, pendientes: 0, retos: 0 });
+  const [stats, setStats] = useState({ usuarios: 0, proyectos: 0, pendientes: 0 });
   const [reportes, setReportes] = useState([]);
+  const [contenidos, setContenidos] = useState({});
   const [usuarios, setUsuarios] = useState([]);
-  const [retos, setRetos] = useState([]);
-  const [nuevoReto, setNuevoReto] = useState({ titulo: '', descripcion: '', termina_el: '' });
   const [alerta, setAlerta] = useState({ visible: false, mensaje: '', tipo: 'info', titulo: '', onConfirm: null });
 
   const avisar = (mensaje, tipo = 'info', titulo) =>
@@ -44,7 +75,7 @@ const Admin = () => {
         return;
       }
       setEsAdmin(true);
-      await Promise.all([cargarStats(), cargarReportes(), cargarUsuarios(), cargarRetos()]);
+      await Promise.all([cargarStats(), cargarReportes(), cargarUsuarios()]);
       setCargando(false);
     };
     init();
@@ -57,20 +88,76 @@ const Admin = () => {
   };
 
   const cargarStats = async () => {
-    const [usuarios, proyectos, pendientes, retos] = await Promise.all([
+    const [usuarios, proyectos, pendientes] = await Promise.all([
       contar('perfiles'),
       contar('proyectos'),
       supabase.from('reportes').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente')
         .then((r) => r.count || 0),
-      contar('retos'),
     ]);
-    setStats({ usuarios, proyectos, pendientes, retos });
+    setStats({ usuarios, proyectos, pendientes });
   };
 
   const cargarReportes = async () => {
     const { data } = await supabase
       .from('reportes').select('*').order('creado_el', { ascending: false }).limit(100);
     setReportes(data || []);
+    cargarContenidos(data || []);
+  };
+
+  // Trae el contenido señalado por cada reporte para poder decidir.
+  const cargarContenidos = async (reps) => {
+    const mapa = {};
+    const proyIds = [...new Set(reps.filter((r) => r.tipo === 'proyecto').map((r) => r.objetivo_id))];
+    const comIds = [...new Set(reps.filter((r) => r.tipo === 'comentario').map((r) => r.objetivo_id))];
+    const perIds = [...new Set(reps.filter((r) => r.tipo === 'perfil').map((r) => r.objetivo_id))];
+    const titulosProy = {};
+    try {
+      if (proyIds.length > 0) {
+        const { data } = await supabase
+          .from('proyectos').select('id, titulo, archivo_url, tipo_archivo').in('id', proyIds);
+        (data || []).forEach((p) => {
+          titulosProy[String(p.id)] = p.titulo;
+          mapa[`proyecto:${p.id}`] = {
+            titulo: p.titulo, imagen: p.archivo_url, esVideo: p.tipo_archivo === 'video',
+          };
+        });
+      }
+      if (comIds.length > 0) {
+        const { data } = await supabase
+          .from('comentarios').select('id, contenido, proyecto_id').in('id', comIds);
+        const pids = [...new Set((data || []).map((c) => c.proyecto_id).filter(Boolean))];
+        if (pids.length > 0) {
+          const { data: proys } = await supabase.from('proyectos').select('id, titulo').in('id', pids);
+          (proys || []).forEach((p) => {
+            titulosProy[String(p.id)] = p.titulo;
+          });
+        }
+        (data || []).forEach((c) => {
+          mapa[`comentario:${c.id}`] = {
+            titulo: `"${c.contenido}"`,
+            subtitulo: titulosProy[String(c.proyecto_id)] ? `En: ${titulosProy[String(c.proyecto_id)]}` : '',
+          };
+        });
+      }
+      if (perIds.length > 0) {
+        const { data } = await supabase
+          .from('perfiles').select('id, nombre_completo, avatar_url, tipo_cuenta').in('id', perIds);
+        (data || []).forEach((p) => {
+          mapa[`perfil:${p.id}`] = {
+            titulo: p.nombre_completo,
+            imagen: p.avatar_url,
+            suspendido: p.tipo_cuenta === 'suspendido',
+          };
+        });
+      }
+    } catch (error) {
+      // Se muestra lo que se haya podido cargar.
+    }
+    reps.forEach((r) => {
+      const k = `${r.tipo}:${r.objetivo_id}`;
+      if (!mapa[k]) mapa[k] = { titulo: '(contenido no disponible: pudo ser eliminado)' };
+    });
+    setContenidos(mapa);
   };
 
   const cargarUsuarios = async () => {
@@ -78,12 +165,6 @@ const Admin = () => {
       .from('perfiles').select('id, nombre_completo, tipo_cuenta, disponible_trabajo')
       .order('nombre_completo').limit(100);
     setUsuarios(data || []);
-  };
-
-  const cargarRetos = async () => {
-    const { data } = await supabase
-      .from('retos').select('*').order('creado_el', { ascending: false });
-    setRetos(data || []);
   };
 
   const marcarReporte = async (id, estado) => {
@@ -105,7 +186,15 @@ const Admin = () => {
         avisar('Error al eliminar: ' + error.message, 'error');
         return;
       }
+      // Verificación real: RLS puede ignorar el borrado sin error.
+      const { data: aunExiste } = await supabase.from(tabla)
+        .select('id').eq('id', reporte.objetivo_id).maybeSingle();
+      if (aunExiste) {
+        avisar('Sin permiso para borrar contenido ajeno. Ejecuta el paso 9 de supabase.sql y recarga el esquema.', 'error');
+        return;
+      }
       await marcarReporte(reporte.id, 'revisado');
+      await cargarReportes();
       avisar('Contenido eliminado y reporte resuelto.', 'exito');
     }, 'Eliminar contenido');
   };
@@ -121,9 +210,23 @@ const Admin = () => {
           avisar('Error: ' + error.message, 'error');
           return;
         }
+        // Verificación real: RLS puede ignorar el cambio sin error.
+        const { data: verif } = await supabase.from('perfiles')
+          .select('tipo_cuenta').eq('id', usuarioId).single();
+        const esperado = suspendido ? 'suspendido' : 'standard';
+        if (!verif || verif.tipo_cuenta !== esperado) {
+          avisar('Sin permiso para cambiar esa cuenta. Ejecuta el paso 9 de supabase.sql y recarga el esquema.', 'error');
+          return;
+        }
         setUsuarios((prev) => prev.map((u) =>
-          u.id === usuarioId ? { ...u, tipo_cuenta: suspendido ? 'suspendido' : 'standard' } : u
+          u.id === usuarioId ? { ...u, tipo_cuenta: esperado } : u
         ));
+        setContenidos((prev) => {
+          const next = { ...prev };
+          const k = `perfil:${usuarioId}`;
+          if (next[k]) next[k] = { ...next[k], suspendido };
+          return next;
+        });
         avisar(suspendido ? 'Cuenta suspendida.' : 'Cuenta reactivada.', 'exito');
       },
       suspendido ? 'Suspender cuenta' : 'Reactivar cuenta'
@@ -143,39 +246,6 @@ const Admin = () => {
       ));
       avisar('Rol actualizado.', 'exito');
     }, 'Cambiar rol');
-  };
-
-  const crearReto = async (e) => {
-    e.preventDefault();
-    if (!nuevoReto.titulo.trim()) {
-      avisar('El reto necesita un título.', 'info');
-      return;
-    }
-    const { error } = await supabase.from('retos').insert({
-      titulo: nuevoReto.titulo.trim(),
-      descripcion: nuevoReto.descripcion.trim() || null,
-      termina_el: nuevoReto.termina_el || null,
-      creado_por: miId,
-    });
-    if (error) {
-      avisar('Error: ' + error.message, 'error');
-      return;
-    }
-    setNuevoReto({ titulo: '', descripcion: '', termina_el: '' });
-    await Promise.all([cargarRetos(), cargarStats()]);
-    avisar('Reto publicado.', 'exito');
-  };
-
-  const alternarReto = async (reto) => {
-    await supabase.from('retos').update({ activo: !reto.activo }).eq('id', reto.id);
-    setRetos((prev) => prev.map((r) => (r.id === reto.id ? { ...r, activo: !reto.activo } : r)));
-  };
-
-  const borrarReto = (id) => {
-    pedirConfirmacion('¿Eliminar este reto y sus participaciones?', async () => {
-      await supabase.from('retos').delete().eq('id', id);
-      await Promise.all([cargarRetos(), cargarStats()]);
-    }, 'Eliminar reto');
   };
 
   if (cargando) return <div className="dash-pantalla"><p className="dash-cargando">Verificando acceso...</p></div>;
@@ -212,7 +282,6 @@ const Admin = () => {
           <span className="dash-stat"><Users size={14} /> {stats.usuarios} usuarios</span>
           <span className="dash-stat"><BarChart3 size={14} /> {stats.proyectos} proyectos</span>
           <span className="dash-stat"><Flag size={14} /> {stats.pendientes} reportes pendientes</span>
-          <span className="dash-stat"><Trophy size={14} /> {stats.retos} retos</span>
         </div>
       </div>
 
@@ -222,9 +291,6 @@ const Admin = () => {
         </button>
         <button type="button" className={`tab ${tab === 'usuarios' ? 'activo' : ''}`} onClick={() => setTab('usuarios')}>
           <Users size={14} /> Usuarios
-        </button>
-        <button type="button" className={`tab ${tab === 'retos' ? 'activo' : ''}`} onClick={() => setTab('retos')}>
-          <Trophy size={14} /> Retos
         </button>
       </div>
 
@@ -241,7 +307,10 @@ const Admin = () => {
                     <div className="crecer">
                       <span className="badge marca">{r.tipo}</span>{' '}
                       <span className="badge">{r.estado}</span>
-                      <p className="sin-margen texto-2"><strong>{r.motivo}</strong></p>
+                      <div className="mt-3">
+                        <VistaContenido contenido={contenidos[`${r.tipo}:${r.objetivo_id}`]} />
+                      </div>
+                      <p className="texto-2 mt-3"><strong>Motivo: {r.motivo}</strong></p>
                       {r.detalle && <p className="sin-margen texto-3">{r.detalle}</p>}
                       <small className="texto-3">
                         {r.creado_el ? new Date(r.creado_el).toLocaleString('es-VE') : ''}
@@ -255,9 +324,10 @@ const Admin = () => {
                           </button>
                         )}
                         {r.tipo === 'perfil' && (
-                          <button type="button" className="btn-icono peligro" title="Suspender usuario" onClick={() => suspender(r.objetivo_id, true)}>
-                            <Ban size={16} />
-                          </button>
+                          <BotonSuspension
+                            suspendido={!!contenidos[`perfil:${r.objetivo_id}`]?.suspendido}
+                            onSuspender={(v) => suspender(r.objetivo_id, v)}
+                          />
                         )}
                         <button type="button" className="btn-icono" title="Desestimar" onClick={() => marcarReporte(r.id, 'desestimado')}>
                           <X size={16} />
@@ -308,63 +378,6 @@ const Admin = () => {
                   )}
                 </div>
                 <hr className="divisor" />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {tab === 'retos' && (
-        <div className="dash-panel">
-          <h4 className="dash-panel-titulo"><Trophy size={18} /> Retos creativos</h4>
-          <form onSubmit={crearReto} className="columna">
-            <input
-              className="campo"
-              placeholder="Título del reto (ej. Retrato en 48h)"
-              maxLength={60}
-              value={nuevoReto.titulo}
-              onChange={(e) => setNuevoReto({ ...nuevoReto, titulo: e.target.value })}
-            />
-            <textarea
-              className="campo"
-              placeholder="Descripción y reglas"
-              maxLength={200}
-              value={nuevoReto.descripcion}
-              onChange={(e) => setNuevoReto({ ...nuevoReto, descripcion: e.target.value })}
-            />
-            <div className="fila">
-              <input
-                type="date"
-                className="campo"
-                value={nuevoReto.termina_el}
-                onChange={(e) => setNuevoReto({ ...nuevoReto, termina_el: e.target.value })}
-              />
-              <button type="submit" className="btn btn-primario">
-                <Plus size={16} /> Publicar reto
-              </button>
-            </div>
-          </form>
-          <hr className="divisor" />
-          <div className="columna">
-            {retos.map((r) => (
-              <div key={r.id} className="fila-entre">
-                <div className="crecer">
-                  <strong>{r.titulo}</strong>{' '}
-                  <span className="badge">{r.activo ? 'activo' : 'cerrado'}</span>
-                  {r.termina_el && <small className="texto-3"> · Cierra: {r.termina_el}</small>}
-                </div>
-                <div className="fila">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => alternarReto(r)}
-                  >
-                    {r.activo ? 'Cerrar' : 'Reabrir'}
-                  </button>
-                  <button type="button" className="btn-icono peligro" title="Eliminar reto" onClick={() => borrarReto(r.id)}>
-                    <Trash2 size={16} />
-                  </button>
-                </div>
               </div>
             ))}
           </div>
