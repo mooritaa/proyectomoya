@@ -29,7 +29,6 @@ import {
   ImagePlus,
   Inbox,
   RotateCcw,
-  Trophy,
   ShieldAlert,
   Eye,
   Flag,
@@ -977,28 +976,6 @@ return (
 
           {menuAbierto && (
             <div className="dash-menu menu-caer">
-              <button
-                type="button"
-                className="dash-menu-item"
-                onClick={() => {
-                  setMenuAbierto(false);
-                  navigate('/galeria');
-                }}
-              >
-                <ImageIcon size={18} /> Galería
-              </button>
-
-              <button
-                type="button"
-                className="dash-menu-item"
-                onClick={() => {
-                  setMenuAbierto(false);
-                  navigate('/retos');
-                }}
-              >
-                <Trophy size={18} /> Retos
-              </button>
-
               {perfil.esAdmin && (
                 <button
                   type="button"

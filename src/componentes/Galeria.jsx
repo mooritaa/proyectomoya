@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { Link, useNavigate } from 'react-router-dom';
-import { User, MessageCircle, Heart, Search, X, Send, Flag, Trophy } from 'lucide-react';
+import { User, MessageCircle, Heart, Search, X, Send, Flag } from 'lucide-react';
 import { moderador } from './moderacion';
 import ComentarioIndividual from './ComentarioIndividual';
 import AlertModal from './AlertModal';
@@ -357,14 +357,9 @@ const Galeria = () => {
             )}
           </div>
 
-          <div className="fila">
-            <Link to="/retos" className="btn btn-ghost">
-              <Trophy size={18} /> Retos
-            </Link>
-            <Link to="/dashboard" className="btn btn-secundario">
-              <User size={18} /> Mi perfil
-            </Link>
-          </div>
+          <Link to="/dashboard" className="btn btn-secundario">
+            <User size={18} /> Mi perfil
+          </Link>
         </nav>
 
         <div className="tabs mb-3">
