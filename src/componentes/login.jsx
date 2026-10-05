@@ -61,13 +61,54 @@ const Login = () => {
     if (error) {
       setModal({ abierto: true, texto: traducirErrorSupabase(error.message), tipo: 'error' });
     } else {
-      const { data: perfil } = await supabase
-        .from('perfiles').select('tipo_cuenta').eq('id', data.user.id).single();
-      if (perfil?.tipo_cuenta === 'suspendido') {
-        await supabase.auth.signOut();
-        setModal({ abierto: true, texto: 'Tu cuenta está suspendida. Contacta a un administrador.', tipo: 'error' });
-      } else {
-        navigate('/dashboard');
+      try {
+        const { data: perfil, error: errorPerfil } = await supabase
+          .from('perfiles')
+          .select('tipo_cuenta')
+          .eq('id', data.user.id)
+          .maybeSingle();
+
+        if (errorPerfil) throw errorPerfil;
+
+        let tipoCuenta = perfil?.tipo_cuenta;
+        if (!perfil) {
+          const tipoMetadata = data.user.user_metadata?.tipo_cuenta;
+          if (!['estandar', 'adulto'].includes(tipoMetadata)) {
+            throw new Error('Esta cuenta todavía no tiene perfil ni guarda el tipo elegido al registrarse. Contacta al soporte para recuperarla.');
+          }
+
+          const { error: crearPerfilError } = await supabase
+            .from('perfiles')
+            .insert([{
+              id: data.user.id,
+              nombre_completo: 'Nuevo Artista',
+              biografia: 'Cuenta pendiente de verificación.',
+              avatar_url: 'https://via.placeholder.com/150',
+              tipo_cuenta: tipoMetadata,
+              fecha_nacimiento: data.user.user_metadata?.fecha_nacimiento || null
+            }]);
+
+          if (crearPerfilError) throw crearPerfilError;
+          tipoCuenta = tipoMetadata;
+        }
+
+        if (tipoCuenta === 'suspendido') {
+          const { error: errorCerrarSesion } = await supabase.auth.signOut();
+          setModal({
+            abierto: true,
+            texto: `Tu cuenta está suspendida. Contacta a un administrador.${errorCerrarSesion ? ` No se pudo cerrar la sesión: ${errorCerrarSesion.message}` : ''}`,
+            tipo: 'error'
+          });
+        } else {
+          handleNavigate(tipoCuenta === 'adulto' ? '/dashboard-adulto' : '/dashboard');
+        }
+      } catch (errorPerfil) {
+        const { error: errorCerrarSesion } = await supabase.auth.signOut();
+        setModal({
+          abierto: true,
+          texto: `No se pudo cargar o recuperar tu perfil: ${errorPerfil.message}${errorCerrarSesion ? ` También hubo un error al cerrar sesión: ${errorCerrarSesion.message}` : ''}`,
+          tipo: 'error'
+        });
       }
     }
     setCargando(false);
@@ -168,4 +209,4 @@ const Login = () => {
   );
 };
 
-export default Login;
+export default Login; 

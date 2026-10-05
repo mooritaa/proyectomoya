@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { Link, useNavigate } from 'react-router-dom';
-import { User, MessageCircle, Heart, Search, X, Send, Flag } from 'lucide-react';
+import { User, MessageCircle, Heart, Search, X, Send, Flag, Trophy } from 'lucide-react';
 import { moderador } from './moderacion';
 import ComentarioIndividual from './ComentarioIndividual';
 import AlertModal from './AlertModal';
@@ -15,6 +15,7 @@ const Galeria = () => {
   const [cargando, setCargando] = useState(true);
   const [busquedaRealizada, setBusquedaRealizada] = useState(false);
   const [userId, setUserId] = useState(null);
+  const [puedeVerExplicito, setPuedeVerExplicito] = useState(false);
 
   const [proyectoSeleccionado, setProyectoSeleccionado] = useState(null);
   const [comentarios, setComentarios] = useState([]);
@@ -51,7 +52,21 @@ const Galeria = () => {
     const { data: { user } } = await supabase.auth.getUser();
     const currentId = user?.id || null;
     setUserId(currentId);
-    fetchProyectosGlobales(false, currentId);
+    let esAdulto = false;
+    if (currentId) {
+      const { data: perfilUsuario, error } = await supabase
+        .from('perfiles')
+        .select('tipo_cuenta')
+        .eq('id', currentId)
+        .maybeSingle();
+      if (error) {
+        console.error('No se pudo comprobar el tipo de cuenta para filtrar la galería:', error.message);
+      } else {
+        esAdulto = perfilUsuario?.tipo_cuenta === 'adulto';
+      }
+    }
+    setPuedeVerExplicito(esAdulto);
+    fetchProyectosGlobales(false, currentId, esAdulto);
     if (currentId) cargarSeguidos(currentId);
   };
 
@@ -66,7 +81,11 @@ const Galeria = () => {
       .then(() => {}, () => {});
   };
 
-  const fetchProyectosGlobales = async (esBusqueda = false, idParaCarga = null) => {
+  const fetchProyectosGlobales = async (
+    esBusqueda = false,
+    idParaCarga = null,
+    mostrarExplicito = puedeVerExplicito
+  ) => {
     setCargando(true);
     const activeUserId = idParaCarga || userId;
 
@@ -74,11 +93,15 @@ const Galeria = () => {
       let query = supabase
         .from('proyectos')
         .select(`
-          id, titulo, archivo_url, tipo_archivo, usuario_id, creado_el,
+          id, titulo, archivo_url, tipo_archivo, usuario_id, creado_el, es_nsfw,
           perfiles!inner ( nombre_completo, avatar_url ),
           likes ( usuario_id ),
           comentarios (count)
         `);
+
+      if (!mostrarExplicito) {
+        query = query.or('es_nsfw.is.null,es_nsfw.eq.false');
+      }
 
       if (esBusqueda && terminoBusqueda.trim() !== '') {
         const t = `%${terminoBusqueda.trim()}%`;
@@ -152,10 +175,12 @@ const Galeria = () => {
       return;
     }
 
-    const moderacion = await moderador.validarTexto(nuevoComentario.trim());
-    if (!moderacion.seguro) {
-      avisar(moderacion.razon || 'Contenido inapropiado detectado.', 'error', 'Comentario bloqueado');
-      return;
+    if (!(puedeVerExplicito && proyectoSeleccionado.es_nsfw === true)) {
+      const moderacion = await moderador.validarTexto(nuevoComentario.trim());
+      if (!moderacion.seguro) {
+        avisar(moderacion.razon || 'Contenido inapropiado detectado.', 'error', 'Comentario bloqueado');
+        return;
+      }
     }
 
     setEnviandoComentario(true);
@@ -186,10 +211,12 @@ const Galeria = () => {
       return;
     }
 
-    const moderacionRespuesta = await moderador.validarTexto(textoRespuesta.trim());
-    if (!moderacionRespuesta.seguro) {
-      avisar('Contiene contenido inapropiado.', 'error', 'Respuesta bloqueada');
-      return;
+    if (!(puedeVerExplicito && proyectoSeleccionado.es_nsfw === true)) {
+      const moderacionRespuesta = await moderador.validarTexto(textoRespuesta.trim());
+      if (!moderacionRespuesta.seguro) {
+        avisar('Contiene contenido inapropiado.', 'error', 'Respuesta bloqueada');
+        return;
+      }
     }
 
     const { error } = await supabase.from('comentarios').insert({
@@ -224,10 +251,12 @@ const Galeria = () => {
       return;
     }
 
-    const resultadoModeracion = await moderador.validarTexto(contenido.trim());
-    if (!resultadoModeracion.seguro) {
-      avisar(resultadoModeracion.razon || 'Contenido inapropiado.', 'error', 'Comentario bloqueado');
-      return;
+    if (!(puedeVerExplicito && proyectoSeleccionado?.es_nsfw === true)) {
+      const resultadoModeracion = await moderador.validarTexto(contenido.trim());
+      if (!resultadoModeracion.seguro) {
+        avisar(resultadoModeracion.razon || 'Contenido inapropiado.', 'error', 'Comentario bloqueado');
+        return;
+      }
     }
 
     const { error } = await supabase
@@ -329,6 +358,9 @@ const Galeria = () => {
           </div>
 
           <div className="fila">
+            <Link to="/retos" className="btn btn-ghost">
+              <Trophy size={18} /> Retos
+            </Link>
             <Link to="/dashboard" className="btn btn-secundario">
               <User size={18} /> Mi perfil
             </Link>
@@ -473,4 +505,4 @@ const Galeria = () => {
   );
 };
 
-export default Galeria;
+export default Galeria; 

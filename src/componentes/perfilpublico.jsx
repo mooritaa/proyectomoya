@@ -17,6 +17,7 @@ const PerfilPublico = () => {
   const [obras, setObras] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [miId, setMiId] = useState(null);
+  const [puedeVerExplicito, setPuedeVerExplicito] = useState(false);
 
   const [proyectoSeleccionado, setProyectoSeleccionado] = useState(null);
   const [comentarios, setComentarios] = useState([]);
@@ -46,17 +47,41 @@ const PerfilPublico = () => {
     const cargarTodo = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setMiId(user?.id || null);
+      let puedeVerExplicito = false;
+
+      if (user) {
+        const { data: perfilVisitante, error: errorVisitante } = await supabase
+          .from('perfiles')
+          .select('tipo_cuenta')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (errorVisitante) {
+          console.error('No se pudo comprobar el tipo de cuenta para el perfil:', errorVisitante.message);
+        } else {
+          puedeVerExplicito = perfilVisitante?.tipo_cuenta === 'adulto';
+        }
+      }
+      setPuedeVerExplicito(puedeVerExplicito);
 
       const { data: dataPerfil } = await supabase
         .from('perfiles').select('*').eq('id', idUsuario).single();
 
-      if (dataPerfil) setPerfil(dataPerfil);
+      if (dataPerfil) {
+        setPerfil(dataPerfil);
+        document.body.style.backgroundColor = dataPerfil.color_fondo_web || '#0f0f0f';
+      }
 
-      const { data: dataObras } = await supabase
+      let queryObras = supabase
         .from('proyectos')
         .select('*, likes (usuario_id), comentarios (count)')
-        .eq('usuario_id', idUsuario)
-        .order('creado_el', { ascending: false });
+        .eq('usuario_id', idUsuario);
+      if (!puedeVerExplicito) {
+        queryObras = queryObras.or('es_nsfw.is.null,es_nsfw.eq.false');
+      }
+      const { data: dataObras, error: errorObras } = await queryObras.order('creado_el', { ascending: false });
+      if (errorObras) {
+        console.error('Error cargando publicaciones del perfil:', errorObras.message);
+      }
 
       if (dataObras) {
         const procesadas = dataObras.map(o => ({
@@ -70,6 +95,7 @@ const PerfilPublico = () => {
     };
 
     cargarTodo();
+    return () => { document.body.style.backgroundColor = ''; };
   }, [idUsuario]);
 
   useEffect(() => {
@@ -138,10 +164,12 @@ const PerfilPublico = () => {
       return;
     }
 
-    const moderacion = await moderador.validarTexto(nuevoComentario.trim());
-    if (!moderacion.seguro) {
-      avisar(moderacion.razon || 'Contenido inapropiado detectado.', 'error', 'Comentario bloqueado');
-      return;
+    if (!(puedeVerExplicito && proyectoSeleccionado?.es_nsfw === true)) {
+      const moderacion = await moderador.validarTexto(nuevoComentario.trim());
+      if (!moderacion.seguro) {
+        avisar(moderacion.razon || 'Contenido inapropiado detectado.', 'error', 'Comentario bloqueado');
+        return;
+      }
     }
 
     setEnviandoComentario(true);
@@ -171,10 +199,12 @@ const PerfilPublico = () => {
       return;
     }
 
-    const moderacionRespuesta = await moderador.validarTexto(textoRespuesta.trim());
-    if (!moderacionRespuesta.seguro) {
-      avisar('Contiene contenido inapropiado.', 'error', 'Respuesta bloqueada');
-      return;
+    if (!(puedeVerExplicito && proyectoSeleccionado.es_nsfw === true)) {
+      const moderacionRespuesta = await moderador.validarTexto(textoRespuesta.trim());
+      if (!moderacionRespuesta.seguro) {
+        avisar('Contiene contenido inapropiado.', 'error', 'Respuesta bloqueada');
+        return;
+      }
     }
 
     const { error } = await supabase.from('comentarios').insert([{
@@ -216,10 +246,12 @@ const PerfilPublico = () => {
       return;
     }
 
-    const resultadoModeracion = await moderador.validarTexto(textoParaValidar);
-    if (!resultadoModeracion.seguro) {
-      avisar(resultadoModeracion.razon || 'Contenido inapropiado.', 'error', 'Comentario bloqueado');
-      return;
+    if (!(puedeVerExplicito && proyectoSeleccionado?.es_nsfw === true)) {
+      const resultadoModeracion = await moderador.validarTexto(textoParaValidar);
+      if (!resultadoModeracion.seguro) {
+        avisar(resultadoModeracion.razon || 'Contenido inapropiado.', 'error', 'Comentario bloqueado');
+        return;
+      }
     }
 
     const { error } = await supabase
@@ -434,4 +466,4 @@ const PerfilPublico = () => {
   );
 };
 
-export default PerfilPublico;
+export default PerfilPublico; 

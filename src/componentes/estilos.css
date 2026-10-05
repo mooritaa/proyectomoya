@@ -371,3 +371,137 @@
   color: var(--marca-400);
   background: var(--superficie-3);
 }
+
+.registro-tarjeta-auth {
+  max-width: 560px;
+  text-align: left;
+}
+
+.registro-tipoCuenta,
+.registro-datosAdulto {
+  margin: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-sm);
+}
+
+.registro-tipoCuenta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.registro-tipoCuenta legend,
+.registro-labelAdulto {
+  color: var(--texto);
+  font-size: var(--fs-sm);
+  font-weight: var(--peso-medio);
+}
+
+.registro-opcionCuenta,
+.registro-confirmacionEdad {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--texto-2);
+  font-size: var(--fs-sm);
+}
+
+.registro-opcionCuenta input,
+.registro-confirmacionEdad input {
+  accent-color: var(--marca-500);
+}
+
+.registro-datosAdulto {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  border-color: var(--marca-500);
+  background: var(--acento-suave);
+}
+
+.registro-advertenciaOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(6px);
+}
+
+.registro-advertenciaAdultos {
+  width: min(100%, 580px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: var(--sp-5);
+  border: 1px solid var(--marca-500);
+  border-radius: var(--radio-lg);
+  background: var(--superficie);
+  color: var(--texto);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65);
+}
+
+.registro-advertenciaAdultos h2 {
+  margin: 0 0 var(--sp-4);
+  color: var(--marca-400);
+  font-size: var(--fs-lg);
+}
+
+.registro-advertenciaAdultos h3 {
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+
+.registro-advertenciaAdultos p,
+.registro-advertenciaAdultos li {
+  color: var(--texto-2);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+
+.registro-advertenciaAdultos ul {
+  padding-left: var(--sp-5);
+}
+
+.registro-accionesAdvertencia {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+}
+
+.registro-aceptarAdvertencia,
+.registro-rechazarAdvertencia {
+  min-width: 112px;
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--radio-sm);
+  font-weight: var(--peso-fuerte);
+  cursor: pointer;
+}
+
+.registro-aceptarAdvertencia {
+  border: 1px solid var(--marca-500);
+  background: var(--marca-500);
+  color: var(--fondo);
+}
+
+.registro-rechazarAdvertencia {
+  border: 1px solid var(--borde-fuerte);
+  background: transparent;
+  color: var(--texto);
+}
+
+.registro-aceptarAdvertencia:disabled,
+.registro-rechazarAdvertencia:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .registro-accionesAdvertencia {
+    flex-direction: column-reverse;
+  }
+} 

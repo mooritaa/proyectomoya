@@ -1,17 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import { useNavigate } from 'react-router-dom';
 import { validarPerfil, validarProyecto } from './validaciones';
 import { moderador } from './moderacion';
+import '../estilos/perfil.css';
 import {
   TEMAS_PERFIL,
   TEMA_POR_DEFECTO_ID,
   buscarTemaPerfil,
   detectarTemaPerfil,
   esFondoClaro,
-  PLANTILLAS_FONDO,
 } from './temasPerfil';
-import '../estilos/perfil.css';
 import {
   Menu,
   User,
@@ -30,15 +29,17 @@ import {
   ImagePlus,
   Inbox,
   RotateCcw,
+  Trophy,
   ShieldAlert,
   Eye,
   Flag,
-  Users,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import AlertModal from './AlertModal';
-import { cargarActividad } from './notificacionesDB';
 
 const STORAGE_KEY_NOTIF_LEIDAS = 'pocketwork_notificaciones_leidas';
+const PLANTILLAS_DISPONIBLES = Array.from({ length: 50 }, (_, index) => `/imagenes/plantillas/textura${index + 1}.png`);
 
 // Comentario con soporte de respuestas anidadas (se renderiza a sí mismo).
 // En el Dashboard siempre se ven publicaciones propias, por eso
@@ -231,6 +232,14 @@ const Dashboard = () => {
     contacto: '',
     esAdmin: false,
   });
+  const perfilTextoGuardadoRef = useRef({
+    nombre: 'Cargando...',
+    bio: 'Artista',
+    area: '',
+    contacto: '',
+  });
+  const [plantillaEnVistaPrevia, setPlantillaEnVistaPrevia] = useState(null);
+  const carruselPlantillasRef = useRef(null);
 
   const [obras, setObras] = useState([]);
   const [nuevaObra, setNuevaObra] = useState({ titulo: '', descripcion: '', imagenUrl: '' });
@@ -252,7 +261,7 @@ const Dashboard = () => {
   const [notificacionesLeidasCount, setNotificacionesLeidasCount] = useState(0);
 
   // Mis números (estadísticas del artista)
-  const [misNumeros, setMisNumeros] = useState({ vistas: 0, likes: 0, comentarios: 0, seguidores: 0, seguidos: 0, top: [] });
+  const [misNumeros, setMisNumeros] = useState({ vistas: 0, likes: 0, comentarios: 0, top: [] });
 
   // UI
   const [editandoTitulo, setEditandoTitulo] = useState(false);
@@ -334,20 +343,7 @@ const Dashboard = () => {
       .sort((a, b) => (porObra[b.id] || 0) - (porObra[a.id] || 0))
       .slice(0, 3)
       .map((o) => ({ id: o.id, titulo: o.titulo, vistas: porObra[o.id] || 0 }));
-    let seguidores = 0;
-    let seguidos = 0;
-    try {
-      const [a, b] = await Promise.all([
-        supabase.from('seguimientos').select('id', { count: 'exact', head: true }).eq('seguido_id', usuario.id),
-        supabase.from('seguimientos').select('id', { count: 'exact', head: true }).eq('seguidor_id', usuario.id),
-      ]);
-      seguidores = a.count || 0;
-      seguidos = b.count || 0;
-    } catch (error) {
-      seguidores = 0;
-      seguidos = 0;
-    }
-    setMisNumeros({ vistas: (v || []).length, likes, comentarios, seguidores, seguidos, top });
+    setMisNumeros({ vistas: (v || []).length, likes, comentarios, top });
   };
 
   const registrarVista = (proyectoId) => {
@@ -374,25 +370,42 @@ const Dashboard = () => {
     }
   };
 
-  // Actividad unificada: comentarios, seguidores y reportes (mismo
-  // formato que la pantalla de notificaciones).
-  const cargarNotificaciones = async () => {
-    if (!usuario) return [];
+  const formatearNotificacion = (comentario) => {
+    const obra = obras.find((o) => o.id === comentario.proyecto_id);
+    const nombreObra = obra ? obra.titulo : 'tu publicación';
+    const nombreAutor = comentario.perfiles?.nombre_completo || 'Alguien';
+    return {
+      id: comentario.id,
+      texto: `${nombreAutor} comentó en ${nombreObra}: "${comentario.contenido}"`,
+      fecha: comentario.creado_el,
+      proyecto_id: comentario.proyecto_id,
+    };
+  };
 
-    try {
-      const items = await cargarActividad(usuario.id);
-      setNotificaciones(items);
-      actualizarContador(items.length);
-      return items;
-    } catch (error) {
-      return [];
+  const cargarNotificaciones = async () => {
+    if (!usuario || obras.length === 0) return [];
+
+    const proyectosIds = obras.map((o) => o.id);
+    const { data, error } = await supabase
+      .from('comentarios')
+      .select(`id, proyecto_id, usuario_id, creado_el, contenido, perfiles(nombre_completo)`)
+      .in('proyecto_id', proyectosIds)
+      .neq('usuario_id', usuario.id);
+
+    if (!error && data) {
+      const formateadas = data.map(formatearNotificacion);
+      setNotificaciones(formateadas);
+      actualizarContador(formateadas.length);
+      return formateadas;
     }
+
+    return [];
   };
 
   useEffect(() => {
-    if (usuario) cargarNotificaciones();
+    if (usuario && obras.length > 0) cargarNotificaciones();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usuario]);
+  }, [obras, usuario]);
 
   useEffect(() => {
     const intervalo = setInterval(() => {
@@ -400,7 +413,7 @@ const Dashboard = () => {
     }, 20000);
     return () => clearInterval(intervalo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usuario]);
+  }, [obras, usuario]);
 
   const manejarIrNotificaciones = async () => {
     const listaActual = await cargarNotificaciones();
@@ -621,7 +634,7 @@ const Dashboard = () => {
     if (error) return;
 
     if (data) {
-      setPerfil({
+      const perfilCargado = {
         nombre: data.nombre_completo || '',
         bio: data.biografia || '',
         colorPrincipal: data.color_principal || '#f07e11',
@@ -634,7 +647,14 @@ const Dashboard = () => {
         area: data.area_trabajo || '',
         contacto: data.contacto_trabajo || '',
         esAdmin: data.tipo_cuenta === 'admin',
-      });
+      };
+      setPerfil(perfilCargado);
+      perfilTextoGuardadoRef.current = {
+        nombre: perfilCargado.nombre,
+        bio: perfilCargado.bio,
+        area: perfilCargado.area,
+        contacto: perfilCargado.contacto,
+      };
     }
   };
 
@@ -660,25 +680,36 @@ const Dashboard = () => {
       return;
     }
 
-    const moderacionNombre = await moderador.validarTexto(perfil.nombre || '');
-    if (!moderacionNombre.seguro) {
-      avisar('Nombre bloqueado: contenido inapropiado detectado.', 'error');
-      return;
-    }
-
-    const moderacionBio = await moderador.validarTexto(perfil.bio || '');
-    if (!moderacionBio.seguro) {
-      avisar('Biografía bloqueada: contenido inapropiado detectado.', 'error');
-      return;
-    }
-
     if (!usuario) {
       avisar('Espera a que cargue tu sesión...', 'info');
       return;
     }
 
-    if (perfil.contacto.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(perfil.contacto.trim())) {
-      avisar('El contacto debe ser un correo electrónico válido.', 'info');
+    const camposTexto = [
+      { clave: 'nombre', etiqueta: 'Nombre' },
+      { clave: 'bio', etiqueta: 'Biografía' },
+      { clave: 'area', etiqueta: 'Área de trabajo' },
+      { clave: 'contacto', etiqueta: 'Contacto' },
+    ];
+    const camposRechazados = [];
+
+    for (const campo of camposTexto) {
+      const moderacion = await moderador.validarTexto(perfil[campo.clave] || '');
+      if (!moderacion.seguro) camposRechazados.push(campo);
+    }
+
+    if (camposRechazados.length > 0) {
+      const valoresGuardados = perfilTextoGuardadoRef.current;
+      setPerfil((actual) => ({
+        ...actual,
+        ...Object.fromEntries(
+          camposRechazados.map(({ clave }) => [clave, valoresGuardados[clave]])
+        ),
+      }));
+      avisar(
+        `Contenido inapropiado en: ${camposRechazados.map(({ etiqueta }) => etiqueta).join(', ')}. Se restauraron los valores guardados.`,
+        'error'
+      );
       return;
     }
 
@@ -711,6 +742,12 @@ const Dashboard = () => {
         avisar('Error guardando perfil: ' + errorPerfil.message, 'error');
       }
     } else {
+      perfilTextoGuardadoRef.current = {
+        nombre: perfil.nombre,
+        bio: perfil.bio,
+        area: perfil.area,
+        contacto: perfil.contacto,
+      };
       avisar('¡Información actualizada!', 'exito');
     }
 
@@ -940,6 +977,28 @@ return (
 
           {menuAbierto && (
             <div className="dash-menu menu-caer">
+              <button
+                type="button"
+                className="dash-menu-item"
+                onClick={() => {
+                  setMenuAbierto(false);
+                  navigate('/galeria');
+                }}
+              >
+                <ImageIcon size={18} /> Galería
+              </button>
+
+              <button
+                type="button"
+                className="dash-menu-item"
+                onClick={() => {
+                  setMenuAbierto(false);
+                  navigate('/retos');
+                }}
+              >
+                <Trophy size={18} /> Retos
+              </button>
+
               {perfil.esAdmin && (
                 <button
                   type="button"
@@ -1129,18 +1188,96 @@ return (
 
           <div className="dash-grupo dash-grupo-ancho">
             <span className="dash-etiqueta">Plantillas (elige una para la vista previa)</span>
-            <div className="dash-plantillas">
-              {PLANTILLAS_FONDO.map((url) => (
+            <div
+              style={{ position: 'relative' }}
+              onMouseLeave={() => setPlantillaEnVistaPrevia(null)}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <button
-                  key={url}
                   type="button"
-                  className={`dash-plantilla ${perfil.imagenFondoUrl === url ? 'seleccionado' : ''}`}
-                  onClick={() => setPerfil((prev) => ({ ...prev, imagenFondoUrl: url }))}
-                  title={url.split('/').pop()}
+                  aria-label="Ver plantillas anteriores"
+                  className="btn btn-ghost"
+                  onClick={() => carruselPlantillasRef.current?.scrollBy({ left: -240, behavior: 'smooth' })}
                 >
-                  <img src={url} alt="" loading="lazy" />
+                  <ChevronLeft size={18} />
                 </button>
-              ))}
+                <div
+                  ref={carruselPlantillasRef}
+                  onWheel={(e) => {
+                    if (carruselPlantillasRef.current) {
+                      e.preventDefault();
+                      carruselPlantillasRef.current.scrollLeft += e.deltaY || e.deltaX;
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    flex: 1,
+                    gap: '8px',
+                    overflowX: 'auto',
+                    padding: '8px 4px',
+                    scrollBehavior: 'smooth',
+                    WebkitOverflowScrolling: 'touch',
+                    scrollbarWidth: 'thin',
+                    touchAction: 'pan-x'
+                  }}
+                >
+                  {PLANTILLAS_DISPONIBLES.map((url, index) => (
+                    <button
+                      key={url}
+                      type="button"
+                      className={`dash-plantilla ${perfil.imagenFondoUrl === url ? 'seleccionado' : ''}`}
+                      title={`Plantilla ${index + 1}`}
+                      aria-label={`Seleccionar plantilla ${index + 1}`}
+                      onMouseEnter={() => setPlantillaEnVistaPrevia(index + 1)}
+                      onFocus={() => setPlantillaEnVistaPrevia(index + 1)}
+                      onBlur={() => setPlantillaEnVistaPrevia(null)}
+                      onClick={() => setPerfil((prev) => ({ ...prev, imagenFondoUrl: url }))}
+                    >
+                      <img src={url} alt="" loading="lazy" />
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  aria-label="Ver plantillas siguientes"
+                  className="btn btn-ghost"
+                  onClick={() => carruselPlantillasRef.current?.scrollBy({ left: 240, behavior: 'smooth' })}
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+
+              <div
+                aria-hidden={!plantillaEnVistaPrevia}
+                style={{
+                  position: 'absolute',
+                  zIndex: 5,
+                  left: '50%',
+                  bottom: 'calc(100% + 8px)',
+                  width: 'min(260px, 70vw)',
+                  height: '150px',
+                  borderRadius: '14px',
+                  overflow: 'hidden',
+                  background: 'var(--superficie)',
+                  border: '2px solid var(--borde-fuerte)',
+                  boxShadow: '0 12px 30px rgba(0,0,0,0.35)',
+                  opacity: plantillaEnVistaPrevia ? 1 : 0,
+                  visibility: plantillaEnVistaPrevia ? 'visible' : 'hidden',
+                  transform: plantillaEnVistaPrevia
+                    ? 'translateX(-50%) scale(1)'
+                    : 'translateX(-50%) scale(0.96)',
+                  transition: 'opacity 180ms ease, transform 220ms ease, visibility 220ms ease',
+                  pointerEvents: 'none'
+                }}
+              >
+                {plantillaEnVistaPrevia && (
+                  <img
+                    src={PLANTILLAS_DISPONIBLES[plantillaEnVistaPrevia - 1]}
+                    alt={`Vista previa de la plantilla ${plantillaEnVistaPrevia}`}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                )}
+              </div>
             </div>
           </div>
 
@@ -1179,12 +1316,12 @@ return (
             />
           </div>
           <div className="dash-grupo">
-            <span className="dash-etiqueta">Contacto (correo electrónico)</span>
+            <span className="dash-etiqueta">Contacto (correo o red)</span>
             <input
-              type="email"
-              maxLength={65}
+              type="text"
+              maxLength={60}
               className="campo"
-              placeholder="tu@correo.com"
+              placeholder="¿Cómo te contactan?"
               value={perfil.contacto}
               onChange={(e) => setPerfil({ ...perfil, contacto: e.target.value })}
             />
@@ -1202,8 +1339,6 @@ return (
           <span className="dash-stat"><Eye size={14} /> {misNumeros.vistas} vistas</span>
           <span className="dash-stat"><Heart size={14} /> {misNumeros.likes} likes</span>
           <span className="dash-stat"><MessageCircle size={14} /> {misNumeros.comentarios} comentarios</span>
-          <span className="dash-stat"><Users size={14} /> {misNumeros.seguidores} seguidores</span>
-          <span className="dash-stat"><User size={14} /> {misNumeros.seguidos} seguidos</span>
         </div>
         {misNumeros.top.length > 0 && (
           <div className="columna mt-3">
@@ -1455,4 +1590,4 @@ return (
   );
 };
 
-export default Dashboard;
+export default Dashboard; 

@@ -4,6 +4,7 @@ import './App.css';
 import Login from './componentes/login';
 import Registro from './componentes/Registro';
 import Dashboard from './componentes/Dashboard';
+import DashboardAdulto from './componentes/Dashboard+18';
 import Galeria from './componentes/Galeria';
 import PerfilPublico from './componentes/perfilpublico';
 import Notificaciones from './componentes/notificaciones';
@@ -32,6 +33,7 @@ function App() {
 
           {/* RUTA DEL DASHBOARD (Privado) */}
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard-adulto" element={<DashboardAdulto />} />
 
           {/* RUTA DE LA GALERÍA PÚBLICA */}
           <Route path="/galeria" element={<Galeria />} />
