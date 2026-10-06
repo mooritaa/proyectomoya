@@ -14,6 +14,7 @@ import {
 import {
   Menu,
   User,
+  Users,
   X,
   Image as ImageIcon,
   Activity,
@@ -36,6 +37,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import AlertModal from './AlertModal';
+import { actualizarNuevasNotificaciones, cargarActividad, habilitarSonidoNotificaciones, reproducirSonidoNotificacion } from './actividad';
 
 const STORAGE_KEY_NOTIF_LEIDAS = 'pocketwork_notificaciones_leidas';
 const PLANTILLAS_DISPONIBLES = Array.from({ length: 50 }, (_, index) => `/imagenes/plantillas/textura${index + 1}.png`);
@@ -257,16 +259,23 @@ const Dashboard = () => {
   // Notificaciones
   const [notificaciones, setNotificaciones] = useState([]);
   const [contadorNotificaciones, setContadorNotificaciones] = useState(0);
-  const [notificacionesLeidasCount, setNotificacionesLeidasCount] = useState(0);
+  const [notificacionesLeidasCount, setNotificacionesLeidasCount] = useState(() => {
+    const almacenadas = Number(localStorage.getItem(STORAGE_KEY_NOTIF_LEIDAS));
+    return Number.isFinite(almacenadas) && almacenadas >= 0 ? almacenadas : 0;
+  });
+  const notificacionesIdsRef = useRef(null);
+  const sonidoInicialNotificacionesRef = useRef(false);
 
   // Mis números (estadísticas del artista)
-  const [misNumeros, setMisNumeros] = useState({ vistas: 0, likes: 0, comentarios: 0, top: [] });
+  const [misNumeros, setMisNumeros] = useState({ vistas: 0, likes: 0, comentarios: 0, seguidores: 0, top: [] });
 
   // UI
   const [editandoTitulo, setEditandoTitulo] = useState(false);
   const [tituloEditando, setTituloEditando] = useState('');
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [mostrarModalSalir, setMostrarModalSalir] = useState(false);
+  const [avisoNotificaciones, setAvisoNotificaciones] = useState(0);
+  const [desvaneciendoAvisoNotificaciones, setDesvaneciendoAvisoNotificaciones] = useState(false);
   const [alerta, setAlerta] = useState({
     visible: false,
     mensaje: '',
@@ -284,14 +293,6 @@ const Dashboard = () => {
     setAlerta({ visible: true, mensaje, tipo: 'confirm', titulo, onConfirm });
 
   useEffect(() => {
-    const almacenadas = localStorage.getItem(STORAGE_KEY_NOTIF_LEIDAS);
-    const parsed = Number(almacenadas);
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      setNotificacionesLeidasCount(parsed);
-    }
-  }, []);
-
-  useEffect(() => {
     localStorage.setItem(STORAGE_KEY_NOTIF_LEIDAS, String(notificacionesLeidasCount));
   }, [notificacionesLeidasCount]);
 
@@ -305,6 +306,30 @@ const Dashboard = () => {
     const leidas = Number(localStorage.getItem(STORAGE_KEY_NOTIF_LEIDAS)) || 0;
     setContadorNotificaciones(Math.max(0, totalNotificaciones - leidas));
   };
+
+  useEffect(() => {
+    const habilitarSonido = () => habilitarSonidoNotificaciones();
+    window.addEventListener('pointerdown', habilitarSonido, { once: true });
+    window.addEventListener('keydown', habilitarSonido, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', habilitarSonido);
+      window.removeEventListener('keydown', habilitarSonido);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (avisoNotificaciones === 0) return undefined;
+
+    const temporizadorDesvanecer = setTimeout(() => setDesvaneciendoAvisoNotificaciones(true), 3500);
+    const temporizadorCerrar = setTimeout(() => {
+      setAvisoNotificaciones(0);
+      setDesvaneciendoAvisoNotificaciones(false);
+    }, 4200);
+    return () => {
+      clearTimeout(temporizadorDesvanecer);
+      clearTimeout(temporizadorCerrar);
+    };
+  }, [avisoNotificaciones]);
 
   useEffect(() => {
     const inicializar = async () => {
@@ -329,6 +354,26 @@ const Dashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [obras]);
 
+  useEffect(() => {
+    if (!usuario) return;
+
+    const cargarSeguidores = async () => {
+      const { count, error } = await supabase
+        .from('seguimientos')
+        .select('id', { count: 'exact', head: true })
+        .eq('seguido_id', usuario.id);
+
+      if (error) {
+        console.error('Error cargando número de seguidores:', error.message);
+        return;
+      }
+
+      setMisNumeros((actual) => ({ ...actual, seguidores: count || 0 }));
+    };
+
+    cargarSeguidores();
+  }, [usuario]);
+
   const cargarNumeros = async () => {
     const ids = obras.map((o) => o.id);
     const { data: v } = await supabase.from('vistas').select('proyecto_id').in('proyecto_id', ids);
@@ -342,7 +387,13 @@ const Dashboard = () => {
       .sort((a, b) => (porObra[b.id] || 0) - (porObra[a.id] || 0))
       .slice(0, 3)
       .map((o) => ({ id: o.id, titulo: o.titulo, vistas: porObra[o.id] || 0 }));
-    setMisNumeros({ vistas: (v || []).length, likes, comentarios, top });
+    setMisNumeros((actual) => ({
+      ...actual,
+      vistas: (v || []).length,
+      likes,
+      comentarios,
+      top,
+    }));
   };
 
   const registrarVista = (proyectoId) => {
@@ -369,40 +420,33 @@ const Dashboard = () => {
     }
   };
 
-  const formatearNotificacion = (comentario) => {
-    const obra = obras.find((o) => o.id === comentario.proyecto_id);
-    const nombreObra = obra ? obra.titulo : 'tu publicación';
-    const nombreAutor = comentario.perfiles?.nombre_completo || 'Alguien';
-    return {
-      id: comentario.id,
-      texto: `${nombreAutor} comentó en ${nombreObra}: "${comentario.contenido}"`,
-      fecha: comentario.creado_el,
-      proyecto_id: comentario.proyecto_id,
-    };
-  };
-
   const cargarNotificaciones = async () => {
-    if (!usuario || obras.length === 0) return [];
+    if (!usuario) return [];
 
-    const proyectosIds = obras.map((o) => o.id);
-    const { data, error } = await supabase
-      .from('comentarios')
-      .select(`id, proyecto_id, usuario_id, creado_el, contenido, perfiles(nombre_completo)`)
-      .in('proyecto_id', proyectosIds)
-      .neq('usuario_id', usuario.id);
-
-    if (!error && data) {
-      const formateadas = data.map(formatearNotificacion);
-      setNotificaciones(formateadas);
-      actualizarContador(formateadas.length);
-      return formateadas;
+    let actividad;
+    try {
+      actividad = await cargarActividad(usuario.id, obras.map((obra) => obra.id), false);
+    } catch (error) {
+      console.error('No se pudo cargar la actividad:', error.message);
+      return [];
     }
-
-    return [];
+    actualizarNuevasNotificaciones(actividad, notificacionesIdsRef);
+    if (!sonidoInicialNotificacionesRef.current) {
+      sonidoInicialNotificacionesRef.current = true;
+      const leidas = Number(localStorage.getItem(STORAGE_KEY_NOTIF_LEIDAS)) || 0;
+      const pendientes = Math.max(0, actividad.length - leidas);
+      if (pendientes > 0) {
+        setAvisoNotificaciones(pendientes);
+        reproducirSonidoNotificacion();
+      }
+    }
+    setNotificaciones(actividad);
+    actualizarContador(actividad.length);
+    return actividad;
   };
 
   useEffect(() => {
-    if (usuario && obras.length > 0) cargarNotificaciones();
+    if (usuario) cargarNotificaciones();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [obras, usuario]);
 
@@ -423,7 +467,9 @@ const Dashboard = () => {
     localStorage.setItem(STORAGE_KEY_NOTIF_LEIDAS, String(total));
     setNotificaciones(listaActual);
 
-    navigate('/notificaciones', { state: { notificaciones: listaActual } });
+    navigate('/notificaciones', {
+      state: { notificaciones: listaActual, dashboardPath: '/dashboard' },
+    });
   };
 
   const manejarLike = async (e, proyectoId, yaTieneLike) => {
@@ -632,6 +678,12 @@ const Dashboard = () => {
 
     if (error) return;
 
+    if (data?.tipo_cuenta === 'suspendido') {
+      await supabase.auth.signOut();
+      navigate('/login', { replace: true });
+      return;
+    }
+
     if (data) {
       const perfilCargado = {
         nombre: data.nombre_completo || '',
@@ -782,7 +834,7 @@ const Dashboard = () => {
 
       const { data: { publicUrl } } = supabase.storage.from('Proyectos').getPublicUrl(nombreArchivo);
 
-      if (archivo.type.startsWith('image') || archivo.type.startsWith('video')) {
+      if (archivo.type.startsWith('image/')) {
         const resultadoModeracion = await moderador.validarMedia(publicUrl, archivo.type);
         if (!resultadoModeracion.seguro) {
           avisar('Archivo bloqueado: contiene contenido inapropiado.', 'error');
@@ -823,19 +875,21 @@ const Dashboard = () => {
       return;
     }
 
-    const resultadoModeracionMedia = await moderador.validarMedia(nuevaObra.imagenUrl, '');
-    if (!resultadoModeracionMedia.seguro) {
-      avisar('Proyecto bloqueado: el archivo contiene contenido inapropiado.', 'error');
-      return;
-    }
-
-    setCargando(true);
-
     let tipoDetectado = 'imagen';
     const urlLower = nuevaObra.imagenUrl.toLowerCase();
 
     if (urlLower.match(/\.(mp4|webm|ogg|mov)$/i)) tipoDetectado = 'video';
     else if (urlLower.match(/\.(mp3|wav|flac|aac)$/i)) tipoDetectado = 'audio';
+
+    if (tipoDetectado === 'imagen') {
+      const resultadoModeracionMedia = await moderador.validarMedia(nuevaObra.imagenUrl, tipoDetectado);
+      if (!resultadoModeracionMedia.seguro) {
+        avisar('Proyecto bloqueado: el archivo contiene contenido inapropiado.', 'error');
+        return;
+      }
+    }
+
+    setCargando(true);
 
     try {
       const { error } = await supabase.from('proyectos').insert([
@@ -959,6 +1013,31 @@ const Dashboard = () => {
   if (cargando && !usuario) return <div className="dash-cargando">Cargando tu espacio...</div>;
 return (
     <section className="dash-pantalla">
+      {avisoNotificaciones > 0 && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: 2100,
+            maxWidth: 'min(380px, calc(100vw - 40px))',
+            padding: '14px 18px',
+            border: '1px solid var(--borde-fuerte)',
+            borderRadius: '14px',
+            background: 'var(--superficie)',
+            color: 'var(--texto)',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.3)',
+            opacity: desvaneciendoAvisoNotificaciones ? 0 : 1,
+            transform: desvaneciendoAvisoNotificaciones ? 'translateY(-8px)' : 'translateY(0)',
+            transition: 'opacity 650ms ease, transform 650ms ease',
+            pointerEvents: 'none',
+          }}
+        >
+          Tienes {avisoNotificaciones} notificación{avisoNotificaciones === 1 ? '' : 'es'} sin leer. Revisa “Ver actividad”.
+        </div>
+      )}
       {/* ---------- Barra superior ---------- */}
       <div className="dash-barra">
         <div className="pos-relativa">
@@ -1258,7 +1337,7 @@ return (
             </div>
           </div>
 
-          <button type="button" className="btn btn-primario" onClick={guardarCambiosPerfil}>
+          <button type="button" className="btn btn-exito" onClick={guardarCambiosPerfil}>
             <Save size={16} /> Guardar cambios
           </button>
           <button type="button" className="btn btn-ghost" onClick={restablecerTema} title="Volver al tema Pocketwork sin banner">
@@ -1316,6 +1395,7 @@ return (
           <span className="dash-stat"><Eye size={14} /> {misNumeros.vistas} vistas</span>
           <span className="dash-stat"><Heart size={14} /> {misNumeros.likes} likes</span>
           <span className="dash-stat"><MessageCircle size={14} /> {misNumeros.comentarios} comentarios</span>
+          <span className="dash-stat"><Users size={14} /> {misNumeros.seguidores} seguidores</span>
         </div>
         {misNumeros.top.length > 0 && (
           <div className="columna mt-3">
@@ -1567,4 +1647,4 @@ return (
   );
 };
 
-export default Dashboard; 
+export default Dashboard;

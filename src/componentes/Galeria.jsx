@@ -357,9 +357,11 @@ const Galeria = () => {
             )}
           </div>
 
-          <Link to="/dashboard" className="btn btn-secundario">
-            <User size={18} /> Mi perfil
-          </Link>
+          <div className="fila">
+            <Link to={puedeVerExplicito ? '/dashboard-adulto' : '/dashboard'} className="btn btn-secundario">
+              <User size={18} /> Mi perfil
+            </Link>
+          </div>
         </nav>
 
         <div className="tabs mb-3">
@@ -500,4 +502,4 @@ const Galeria = () => {
   );
 };
 
-export default Galeria; 
+export default Galeria;

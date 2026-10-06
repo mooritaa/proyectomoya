@@ -11,11 +11,13 @@ import {
   detectarTemaPerfil,
   esFondoClaro,
 } from './temasPerfil';
-import { Menu, User, Image as ImageIcon, ImagePlus, Activity, LogOut, Heart, MessageCircle, Trash2, Pencil, Save, X, Send, Palette, Settings, Inbox, RotateCcw, ChevronLeft, ChevronRight, Eye, Trophy } from 'lucide-react';
+import { Menu, User, Users, Image as ImageIcon, ImagePlus, Activity, LogOut, Heart, MessageCircle, Trash2, Pencil, Save, X, Send, Palette, Settings, Inbox, RotateCcw, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { actualizarNuevasNotificaciones, cargarActividad, habilitarSonidoNotificaciones, obtenerClaveNotificacionesLeidas, reproducirSonidoNotificacion } from './actividad';
 
 
-const STORAGE_KEY_NOTIF_LEIDAS = 'pocketwork_notificaciones_leidas';
+const STORAGE_KEY_NOTIF_LEIDAS = obtenerClaveNotificacionesLeidas(true);
 const STORAGE_KEY_BIENVENIDA_ADULTO = 'pocketwork_bienvenida_adulto';
+const STORAGE_KEY_CONTENIDO_EXPLICITO = 'pocketwork_adulto_contenido_explicito';
 const PLANTILLAS_DISPONIBLES = Array.from({ length: 50 }, (_, index) => `/imagenes/plantillas/textura${index + 1}.png`);
 
 const ComentarioIndividual = ({ comentario, todosLosComentarios, alResponder, alBorrar, respondiendoA, enviarRespuesta, textoRespuesta, setTextoRespuesta, currentUserId, comentarioEditandoId, comentarioEditandoTexto, setComentarioEditandoId, setComentarioEditandoTexto, actualizarComentario }) => {
@@ -162,12 +164,31 @@ const Dashboard = ({ alCerrarSesion }) => {
   const carruselPlantillasRef = useRef(null);
 
   const [obras, setObras] = useState([]);
-  const [misNumeros, setMisNumeros] = useState({ vistas: 0, likes: 0, comentarios: 0, top: [] });
+  const [misNumeros, setMisNumeros] = useState({ vistas: 0, likes: 0, comentarios: 0, seguidores: 0, top: [] });
   const [nuevaObra, setNuevaObra] = useState({ titulo: '', descripcion: '', imagenUrl: '' });
   const [contenidoExplicito, setContenidoExplicito] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [inicializando, setInicializando] = useState(true);
   const [perfilAdultoVerificado, setPerfilAdultoVerificado] = useState(false);
+
+  useEffect(() => {
+    try {
+      const guardado = localStorage.getItem(STORAGE_KEY_CONTENIDO_EXPLICITO);
+      if (guardado === 'true') {
+        setContenidoExplicito(true);
+      }
+    } catch (error) {
+      console.warn('No se pudo restaurar el estado de contenido explícito:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_CONTENIDO_EXPLICITO, String(contenidoExplicito));
+    } catch (error) {
+      console.warn('No se pudo guardar el estado de contenido explícito:', error);
+    }
+  }, [contenidoExplicito]);
 
   // ESTADOS PARA COMENTARIOS
   const [proyectoSeleccionado, setProyectoSeleccionado] = useState(null);
@@ -182,22 +203,21 @@ const Dashboard = ({ alCerrarSesion }) => {
 
   const [notificaciones, setNotificaciones] = useState([]);
   const [contadorNotificaciones, setContadorNotificaciones] = useState(0);
-  const [notificacionesLeidasCount, setNotificacionesLeidasCount] = useState(0);
+  const [notificacionesLeidasCount, setNotificacionesLeidasCount] = useState(() => {
+    const almacenadas = Number(localStorage.getItem(STORAGE_KEY_NOTIF_LEIDAS));
+    return Number.isFinite(almacenadas) && almacenadas >= 0 ? almacenadas : 0;
+  });
+  const notificacionesIdsRef = useRef(null);
+  const sonidoInicialNotificacionesRef = useRef(false);
 
   const [editandoTitulo, setEditandoTitulo] = useState(false);
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [mostrarModalSalir, setMostrarModalSalir] = useState(false);
+  const [avisoNotificaciones, setAvisoNotificaciones] = useState(0);
+  const [desvaneciendoAvisoNotificaciones, setDesvaneciendoAvisoNotificaciones] = useState(false);
   const [mostrarBienvenidaAdulto, setMostrarBienvenidaAdulto] = useState(false);
   const [desvaneciendoBienvenida, setDesvaneciendoBienvenida] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
-
-  useEffect(() => {
-    const almacenadas = localStorage.getItem(STORAGE_KEY_NOTIF_LEIDAS);
-    const parsed = Number(almacenadas);
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      setNotificacionesLeidasCount(parsed);
-    }
-  }, []);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_NOTIF_LEIDAS, String(notificacionesLeidasCount));
@@ -208,6 +228,30 @@ const Dashboard = ({ alCerrarSesion }) => {
     const nuevos = Math.max(0, totalNotificaciones - leidas);
     setContadorNotificaciones(nuevos);
   };
+
+  useEffect(() => {
+    const habilitarSonido = () => habilitarSonidoNotificaciones();
+    window.addEventListener('pointerdown', habilitarSonido, { once: true });
+    window.addEventListener('keydown', habilitarSonido, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', habilitarSonido);
+      window.removeEventListener('keydown', habilitarSonido);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (avisoNotificaciones === 0) return undefined;
+
+    const temporizadorDesvanecer = setTimeout(() => setDesvaneciendoAvisoNotificaciones(true), 3500);
+    const temporizadorCerrar = setTimeout(() => {
+      setAvisoNotificaciones(0);
+      setDesvaneciendoAvisoNotificaciones(false);
+    }, 4200);
+    return () => {
+      clearTimeout(temporizadorDesvanecer);
+      clearTimeout(temporizadorCerrar);
+    };
+  }, [avisoNotificaciones]);
 
   useEffect(() => {
     const leidas = Number(localStorage.getItem(STORAGE_KEY_NOTIF_LEIDAS)) || 0;
@@ -272,7 +316,28 @@ const Dashboard = ({ alCerrarSesion }) => {
     if (usuario && perfilAdultoVerificado) {
       cargarObrasConStats();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usuario, perfilAdultoVerificado]);
+
+  useEffect(() => {
+    if (!usuario) return;
+
+    const cargarSeguidores = async () => {
+      const { count, error } = await supabase
+        .from('seguimientos')
+        .select('id', { count: 'exact', head: true })
+        .eq('seguido_id', usuario.id);
+
+      if (error) {
+        console.error('Error cargando número de seguidores:', error.message);
+        return;
+      }
+
+      setMisNumeros((actual) => ({ ...actual, seguidores: count || 0 }));
+    };
+
+    cargarSeguidores();
+  }, [usuario]);
 
   const cargarObrasConStats = async () => {
     const { data, error } = await supabase
@@ -299,7 +364,13 @@ const Dashboard = ({ alCerrarSesion }) => {
   useEffect(() => {
     const cargarNumeros = async () => {
       if (obras.length === 0) {
-        setMisNumeros({ vistas: 0, likes: 0, comentarios: 0, top: [] });
+        setMisNumeros((actual) => ({
+          ...actual,
+          vistas: 0,
+          likes: 0,
+          comentarios: 0,
+          top: []
+        }));
         return;
       }
 
@@ -332,56 +403,48 @@ const Dashboard = ({ alCerrarSesion }) => {
           vistas: vistasPorObra[obra.id] || 0
         }));
 
-      setMisNumeros({ vistas: (vistas || []).length, likes, comentarios, top });
+      setMisNumeros((actual) => ({
+        ...actual,
+        vistas: (vistas || []).length,
+        likes,
+        comentarios,
+        top
+      }));
     };
 
     cargarNumeros();
   }, [obras]);
 
-  const formatearNotificacion = (comentario) => {
-    const obra = obras.find(o => o.id === comentario.proyecto_id);
-    const nombreObra = obra ? obra.titulo : 'tu publicación';
-    const nombreAutor = comentario.perfiles?.nombre_completo || 'Alguien';
-    return {
-      id: comentario.id,
-      texto: `${nombreAutor} comentó en ${nombreObra}: "${comentario.contenido}"`,
-      fecha: comentario.creado_el,
-      proyecto_id: comentario.proyecto_id
-    };
-  };
-
   const cargarNotificaciones = async () => {
-    if (!usuario || obras.length === 0) {
+    if (!usuario) return [];
+
+    let actividad;
+    try {
+      actividad = await cargarActividad(usuario.id, obras.map((obra) => obra.id), true);
+    } catch (error) {
+      console.error('No se pudo cargar la actividad:', error.message);
       return [];
     }
-
-    console.log('[Dashboard] cargarNotificaciones: usuario=', usuario?.id, 'obras=', obras.length);
-
-    const proyectosIds = obras.map(o => o.id);
-    const { data, error } = await supabase
-      .from('comentarios')
-      .select(`id, proyecto_id, usuario_id, creado_el, contenido, perfiles(nombre_completo)`)
-      .in('proyecto_id', proyectosIds)
-      .neq('usuario_id', usuario.id);
-
-    if (!error && data) {
-      const formateadas = data.map(formatearNotificacion);
-      setNotificaciones(formateadas);
-
-      actualizarContador(formateadas.length);
-
-      console.log('[Dashboard] cargarNotificaciones: totalDB=', formateadas.length);
-
-      return formateadas;
+    actualizarNuevasNotificaciones(actividad, notificacionesIdsRef);
+    if (!sonidoInicialNotificacionesRef.current) {
+      sonidoInicialNotificacionesRef.current = true;
+      const leidas = Number(localStorage.getItem(STORAGE_KEY_NOTIF_LEIDAS)) || 0;
+      const pendientes = Math.max(0, actividad.length - leidas);
+      if (pendientes > 0) {
+        setAvisoNotificaciones(pendientes);
+        reproducirSonidoNotificacion();
+      }
     }
-
-    return [];
+    setNotificaciones(actividad);
+    actualizarContador(actividad.length);
+    return actividad;
   };
   // EFECTO 1: Solo carga al iniciar o cuando cambian las obras
   useEffect(() => {
-    if (usuario && perfilAdultoVerificado && obras.length > 0) {
+    if (usuario && perfilAdultoVerificado) {
       cargarNotificaciones();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [obras, usuario, perfilAdultoVerificado]);
 
   // EFECTO 2: El intervalo (Asegúrate de que use la versión fresca de la función)
@@ -390,6 +453,7 @@ const Dashboard = ({ alCerrarSesion }) => {
       if (perfilAdultoVerificado) cargarNotificaciones();
     }, 20000);
     return () => clearInterval(intervalo);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [obras, usuario, perfilAdultoVerificado]);
 
 
@@ -405,7 +469,9 @@ const Dashboard = ({ alCerrarSesion }) => {
     localStorage.setItem(STORAGE_KEY_NOTIF_LEIDAS, String(total));
     setNotificaciones(listaActual);
 
-    navigate('/notificaciones', { state: { notificaciones: listaActual } });
+    navigate('/notificaciones', {
+      state: { notificaciones: listaActual, dashboardPath: '/dashboard-adulto' }
+    });
   };
 
 
@@ -504,7 +570,7 @@ const Dashboard = ({ alCerrarSesion }) => {
       }
     }
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('comentarios')
       .insert([{
         proyecto_id: proyectoSeleccionado.id,
@@ -545,7 +611,7 @@ const Dashboard = ({ alCerrarSesion }) => {
       }
     }
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('comentarios')
       .update({ contenido: textoParaValidar }) // Usamos el texto ya validado
       .eq('id', comentarioId)
@@ -581,7 +647,7 @@ const Dashboard = ({ alCerrarSesion }) => {
       return;
     }
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('proyectos')
       .update({ titulo: tituloParaValidar }) // Usamos el texto ya moderado
       .eq('id', proyectoSeleccionado.id)
@@ -623,6 +689,12 @@ const Dashboard = ({ alCerrarSesion }) => {
     if (error) {
       console.error('Error cargando perfil +18:', error.message);
       throw error;
+    }
+
+    if (data.tipo_cuenta === 'suspendido') {
+      await supabase.auth.signOut();
+      navigate('/login', { replace: true });
+      return null;
     }
 
     if (data) {
@@ -805,10 +877,10 @@ const Dashboard = ({ alCerrarSesion }) => {
         .from('Proyectos')
         .getPublicUrl(nombreArchivo);
 
-      if (archivo.type.startsWith('image') || archivo.type.startsWith('video')) {
+      if (archivo.type.startsWith('image/')) {
         const resultadoModeracion = contenidoExplicito
-          ? await moderador.validarMediaGore(publicUrl)
-          : await moderador.validarMediaNoExplicita(publicUrl);
+          ? await moderador.validarMediaGore(publicUrl, archivo.type)
+          : await moderador.validarMediaNoExplicita(publicUrl, archivo.type);
         if (!resultadoModeracion.seguro) {
           const { error: errorEliminar } = await supabase.storage.from('Proyectos').remove([nombreArchivo]);
           if (errorEliminar) {
@@ -864,10 +936,10 @@ const Dashboard = ({ alCerrarSesion }) => {
 
     setCargando(true);
     try {
-      if (tipoDetectado !== 'audio') {
+      if (tipoDetectado === 'imagen') {
         const resultadoModeracionMedia = contenidoExplicito
-          ? await moderador.validarMediaGore(nuevaObra.imagenUrl)
-          : await moderador.validarMediaNoExplicita(nuevaObra.imagenUrl);
+          ? await moderador.validarMediaGore(nuevaObra.imagenUrl, tipoDetectado)
+          : await moderador.validarMediaNoExplicita(nuevaObra.imagenUrl, tipoDetectado);
         if (!resultadoModeracionMedia.seguro) {
           alert(contenidoExplicito
             ? '❌ Proyecto bloqueado: se detectó contenido gore.'
@@ -1020,6 +1092,31 @@ const Dashboard = ({ alCerrarSesion }) => {
 
   return (
     <section className="dash-pantalla">
+      {avisoNotificaciones > 0 && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: 2100,
+            maxWidth: 'min(380px, calc(100vw - 40px))',
+            padding: '14px 18px',
+            border: '1px solid var(--borde-fuerte)',
+            borderRadius: '14px',
+            background: 'var(--superficie)',
+            color: 'var(--texto)',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.3)',
+            opacity: desvaneciendoAvisoNotificaciones ? 0 : 1,
+            transform: desvaneciendoAvisoNotificaciones ? 'translateY(-8px)' : 'translateY(0)',
+            transition: 'opacity 650ms ease, transform 650ms ease',
+            pointerEvents: 'none',
+          }}
+        >
+          Tienes {avisoNotificaciones} notificación{avisoNotificaciones === 1 ? '' : 'es'} sin leer. Revisa “Ver actividad”.
+        </div>
+      )}
       {mostrarBienvenidaAdulto && (
         <div
           role="status"
@@ -1083,24 +1180,15 @@ const Dashboard = ({ alCerrarSesion }) => {
             <div className="dash-menu menu-caer">
               <button
                 type="button"
-                onClick={() => { setMenuAbierto(false); navigate('/galeria'); }}
-                className="dash-menu-item"
-              >
-                <ImageIcon size={18} /> Galería
-              </button>
-              <button
-                type="button"
-                onClick={() => { setMenuAbierto(false); navigate('/retos'); }}
-                className="dash-menu-item"
-              >
-                <Trophy size={18} /> Retos
-              </button>
-              <button
-                type="button"
-                onClick={() => { setMenuAbierto(false); navigate('/notificaciones'); }}
+                onClick={() => { setMenuAbierto(false); manejarIrNotificaciones(); }}
                 className="dash-menu-item"
               >
                 <Activity size={18} /> Ver actividad
+                {contadorNotificaciones > 0 && (
+                  <span className="badge" style={{ marginLeft: '8px', minWidth: '20px' }}>
+                    {contadorNotificaciones}
+                  </span>
+                )}
               </button>
               <hr className="dash-menu-sep" />
               <button
@@ -1113,6 +1201,7 @@ const Dashboard = ({ alCerrarSesion }) => {
             </div>
           )}
         </div>
+
         <button type="button" className="btn btn-ghost" onClick={() => navigate('/galeria')}>
           <ImageIcon size={18} /> Explorar galería
         </button>
@@ -1633,6 +1722,7 @@ const Dashboard = ({ alCerrarSesion }) => {
           <span className="dash-stat"><Eye size={14} /> {misNumeros.vistas} vistas</span>
           <span className="dash-stat"><Heart size={14} /> {misNumeros.likes} likes</span>
           <span className="dash-stat"><MessageCircle size={14} /> {misNumeros.comentarios} comentarios</span>
+          <span className="dash-stat"><Users size={14} /> {misNumeros.seguidores} seguidores</span>
         </div>
         {misNumeros.top.length > 0 && (
           <div className="columna mt-3">

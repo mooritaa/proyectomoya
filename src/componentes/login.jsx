@@ -7,6 +7,7 @@ import logoPocketwork from '../imagenes/logo.png';
 import './estilos.css';
 import ModalMensaje from './ModalMensaje';
 import { traducirErrorSupabase } from './validaciones';
+import { habilitarSonidoNotificaciones } from './actividad';
 
 const Login = () => {
   const [datos, setDatos] = useState({ correo: '', clave: '' });
@@ -51,6 +52,7 @@ const Login = () => {
       return;
     }
 
+    habilitarSonidoNotificaciones();
     setCargando(true);
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -79,14 +81,14 @@ const Login = () => {
 
           const { error: crearPerfilError } = await supabase
             .from('perfiles')
-            .insert([{
+            .upsert([{
               id: data.user.id,
               nombre_completo: 'Nuevo Artista',
               biografia: 'Cuenta pendiente de verificación.',
               avatar_url: 'https://via.placeholder.com/150',
               tipo_cuenta: tipoMetadata,
               fecha_nacimiento: data.user.user_metadata?.fecha_nacimiento || null
-            }]);
+            }], { onConflict: 'id' });
 
           if (crearPerfilError) throw crearPerfilError;
           tipoCuenta = tipoMetadata;
@@ -209,4 +211,4 @@ const Login = () => {
   );
 };
 
-export default Login; 
+export default Login;

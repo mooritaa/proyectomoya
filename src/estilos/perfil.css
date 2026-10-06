@@ -100,13 +100,21 @@
 }
 
 .dash-avatar {
+  display: block;
   width: 138px;
   height: 138px;
+  margin: 0 auto;
   border-radius: var(--radio-pill);
   object-fit: cover;
   border: 5px solid var(--marca-500);
   background: var(--superficie-2);
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+}
+
+div.dash-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .dash-nombre {
@@ -321,6 +329,18 @@
 .dash-publicar-fila .campo {
   flex: 1 1 240px;
   width: auto;
+}
+
+.dash-publicar-opcion-explicita {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+
+.dash-publicar-opcion-explicita input {
+  accent-color: var(--marca-500);
 }
 /* ---------- Grilla de obras ---------- */
 .dash-titulo-seccion {

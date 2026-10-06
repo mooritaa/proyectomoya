@@ -100,20 +100,43 @@ const Registro = () => {
 
       if (!data.user) throw new Error('No se pudo obtener el usuario creado.');
 
-      const { error: errorPerfil } = await supabase.from('perfiles').insert([{
+      // Si el proyecto exige confirmar el correo, aún no hay sesión y el
+      // usuario auth todavía no es visible: insertar el perfil ahora falla
+      // con "violates foreign key constraint perfiles_id_fkey".
+      // En ese caso el perfil lo crea el trigger handle_new_user
+      // (bloque 10 de supabase.sql) o el login al entrar.
+      if (!data.session) {
+        await supabase.auth.signOut();
+        setEnviado(true);
+        setModal({
+          abierto: true,
+          texto: '¡Registro exitoso! Verifica tu correo electrónico para activar tu cuenta. Tu perfil se terminará de crear al iniciar sesión.',
+          tipo: 'exito'
+        });
+        setEmail('');
+        setPassword('');
+        return;
+      }
+
+      // Upsert: si el trigger ya creó el perfil, no falla por duplicado.
+      const { error: errorPerfil } = await supabase.from('perfiles').upsert([{
         id: data.user.id,
         nombre_completo: 'Nuevo Artista',
         biografia: 'Cuenta pendiente de verificación.',
         avatar_url: 'https://via.placeholder.com/150',
         tipo_cuenta: tipo,
         fecha_nacimiento: nacimiento
-      }]);
+      }], { onConflict: 'id' });
 
       if (errorPerfil) {
         const { error: errorCerrarSesion } = await supabase.auth.signOut();
+        const esFK = errorPerfil.message.includes('perfiles_id_fkey')
+          || errorPerfil.message.toLowerCase().includes('foreign key');
         setModal({
           abierto: true,
-          texto: `La cuenta se creó, pero no se pudo guardar su perfil: ${errorPerfil.message}${errorCerrarSesion ? ` También hubo un error al cerrar la sesión: ${errorCerrarSesion.message}` : ''}`,
+          texto: esFK
+            ? `La cuenta se creó. Verifica tu correo e inicia sesión: tu perfil se creará automáticamente al entrar.${errorCerrarSesion ? ` También hubo un error al cerrar la sesión: ${errorCerrarSesion.message}` : ''}`
+            : `La cuenta se creó, pero no se pudo guardar su perfil: ${errorPerfil.message}${errorCerrarSesion ? ` También hubo un error al cerrar la sesión: ${errorCerrarSesion.message}` : ''}`,
           tipo: 'error'
         });
         return;
@@ -376,4 +399,4 @@ const Registro = () => {
   );
 };
 
-export default Registro; 
+export default Registro;
